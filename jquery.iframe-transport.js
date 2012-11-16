@@ -10,59 +10,26 @@
 
 // ## Usage
 
-// To use this plugin, you simply add an `iframe` option with the value `true`
-// to the Ajax settings an `$.ajax()` call, and specify the file fields to
-// include in the submssion using the `files` option, which can be a selector,
+// To use this plugin, set the dataType to `iframe` in the options of
+// `$.ajax()` call, and specify the file fields to include in the submssion
+// using the `files` option., which can be a selector,
 // jQuery object, or a list of DOM elements containing one or more
 // `<input type="file">` elements:
 
-//     $("#myform").submit(function() {
-//         $.ajax(this.action, {
-//             files: $(":file", this),
-//             iframe: true
-//         }).complete(function(data) {
-//             console.log(data);
-//         });
-//     });
+//      $("#myform").submit(function() {
+//          $.ajax(this.action, {
+//              files: $(":file", this),
+//              dataType: 'iframe',
+//              success: function(data) {
+//                  console.log(data);
+//              });
+//      });
 
 // The plugin will construct hidden `<iframe>` and `<form>` elements, add the
 // file field(s) to that form, submit the form, and process the response.
 
 // If you want to include other form fields in the form submission, include
-// them in the `data` option, and set the `processData` option to `false`:
-
-//     $("#myform").submit(function() {
-//         $.ajax(this.action, {
-//             data: $(":text", this).serializeArray(),
-//             files: $(":file", this),
-//             iframe: true,
-//             processData: false
-//         }).complete(function(data) {
-//             console.log(data);
-//         });
-//     });
-
-// ### Response Data Types
-
-// As the transport does not have access to the HTTP headers of the server
-// response, it is not as simple to make use of the automatic content type
-// detection provided by jQuery as with regular XHR. If you can't set the
-// expected response data type (for example because it may vary depending on
-// the outcome of processing by the server), you will need to employ a
-// workaround on the server side: Send back an HTML document containing just a
-// `<textarea>` element with a `data-type` attribute that specifies the MIME
-// type, and put the actual payload in the textarea:
-
-//     <textarea data-type="application/json">
-//       {"ok": true, "message": "Thanks so much"}
-//     </textarea>
-
-// The iframe transport plugin will detect this and pass the value of the
-// `data-type` attribute on to jQuery as if it was the "Content-Type" response
-// header, thereby enabling the same kind of conversions that jQuery applies
-// to regular responses. For the example above you should get a Javascript
-// object as the `data` parameter of the `complete` callback, with the
-// properties `ok: true` and `message: "Thanks so much"`.
+// them in the `data` option
 
 // ### Handling Server Errors
 
@@ -74,9 +41,7 @@
 // the content of the response payload. For example, consider using a JSON
 // response such as the following to indicate a problem with an uploaded file:
 
-//     <textarea data-type="application/json">
-//       {"ok": false, "message": "Please only upload reasonably sized files."}
-//     </textarea>
+//     {"ok": false, "message": "Please only upload reasonably sized files."}
 
 // ### Compatibility
 
@@ -95,8 +60,8 @@
     // Register a prefilter that checks whether the `iframe` option is set, and
     // switches to the "iframe" data type if it is `true`.
     $.ajaxPrefilter(function(options, origOptions, jqXHR) {
-        if (options.iframe) {
-            return "iframe";
+        if (options.dataType === 'iframe' && options.data) {
+            options.processData = false;
         }
     });
 
@@ -179,23 +144,26 @@
                         // prepares the required conversions to be made in that case.
                         iframe.unbind("load")
                             .bind("load", function() {
-                                var doc = this.contentWindow ? this.contentWindow.document :
-                                    (this.contentDocument ? this.contentDocument : this.document),
-                                    root = doc.documentElement ? doc.documentElement : doc.body,
-                                    textarea = root.getElementsByTagName("textarea")[0],
-                                    type = textarea && textarea.getAttribute("data-type") || null,
-                                    status = textarea && textarea.getAttribute("data-status") || 200,
-                                    statusText = textarea && textarea.getAttribute("data-statusText") || "OK",
-                                    content = {
-                                        html: root.innerHTML,
-                                        text: type ?
-                                        textarea.value :
-                                        root ? (root.textContent || root.innerText) : null
-                                    };
-                                    cleanUp();
-                                    completeCallback(status, statusText, content, type ?
-                                        ("Content-Type: " + type) :
-                                        null);
+                                var response;
+                                // Wrap in a try/catch block to catch exceptions thrown
+                                // when trying to access cross-domain iframe contents:
+                                try {
+                                    response = iframe.contents();
+                                    // Google Chrome and Firefox do not throw an
+                                    // exception when calling iframe.contents() on
+                                    // cross-domain requests, so we unify the response:
+                                    if (!response.length || !response[0].firstChild) {
+                                        throw new Error();
+                                    }
+                                } catch (e) {
+                                    response = undefined;
+                                }
+                                cleanUp();
+                                completeCallback(
+                                    200,
+                                    'success',
+                                    {iframe: response}
+                                );
                             });
 
                         // Now that the load handler has been set up, submit the form.
@@ -217,6 +185,22 @@
                     }
                 }
             };
+        }
+    });
+
+    // The iframe transport returns the iframe content document as response.
+    // The following adds converters from iframe to text, json, html
+    $.ajaxSetup({
+        converters: {
+            'iframe text': function (iframe) {
+                return $(iframe[0].body).text();
+            },
+            'iframe json': function (iframe) {
+                return $.parseJSON($(iframe[0].body).text());
+            },
+            'iframe html': function (iframe) {
+                return $(iframe[0].body).html();
+            }
         }
     });
 
