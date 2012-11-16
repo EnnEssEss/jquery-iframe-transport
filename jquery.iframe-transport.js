@@ -4,7 +4,7 @@
 // input fields. This is done by switching the exchange from `XMLHttpRequest`
 // to a hidden `iframe` element containing a form that is submitted.
 
-// The [source for the plugin](http://github.com/cmlenz/jquery-iframe-transport)
+// The [source for the original plugin](http://github.com/cmlenz/jquery-iframe-transport)
 // is available on [Github](http://github.com/) and dual licensed under the MIT
 // or GPL Version 2 licenses.
 
@@ -45,12 +45,7 @@
 
 // ### Compatibility
 
-// This plugin has primarily been tested on Safari 5 (or later), Firefox 4 (or
-// later), and Internet Explorer (all the way back to version 6). While I
-// haven't found any issues with it so far, I'm fairly sure it still doesn't
-// work around all the quirks in all different browsers. But the code is still
-// pretty simple overall, so you should be able to fix it and contribute a
-// patch :)
+// This plugin has primarily been tested on Firefox, IE7+
 
 // ## Annotated Source
 
@@ -72,85 +67,41 @@
     // inputs.
     $.ajaxTransport('iframe', function(options, origOptions, jqXHR) {
         var form = null,
-            iframe = null,
-            name = "iframe-" + $.now(),
-            fileInputs = $(options.files).filter('input:file:enabled'),
-            fileInputClones = null;
+            iframe = null;
 
-        // This function gets called after a successful submission or an abortion
-        // and should revert all changes made to the page to enable the
-        // submission via this transport.
+        // This function gets called after a successful submit or an abort
         function cleanUp() {
-            fileInputClones.replaceWith(function(index) {
-                return fileInputs.get(index);
-            });
             if (form) {
                 form.remove();
             }
-            if (iframe) {
-                // We set the src in the iframe to abort the iframe's current request
-                iframe.off('load')
-                    .prop('src', 'javascript:false;')
-                    .remove();
-            }
+            form = null;
+            iframe = null;
         }
 
-        if (fileInputs.length) {
-            form = $("<form enctype='multipart/form-data' method='post'></form>")
-                .hide()
-                .attr({action: options.url, target: name});
-
-            // If there is any additional data specified via the `data` option,
-            // we add it as hidden fields to the form. This (currently) requires
-            // the `processData` option to be set to false so that the data doesn't
-            // get serialized to a string.
-            if (typeof(options.data) === "string" && options.data.length > 0) {
-                $.error("data must not be serialized");
-            }
-            $.each(options.data || {}, function(name, value) {
-                if ($.isPlainObject(value)) {
-                    name = value.name;
-                    value = value.value;
-                }
-                $("<input type='hidden' />").attr({name:  name, value: value})
-                    .appendTo(form);
-            });
-
-            // Add a hidden `X-Requested-With` field with the value `IFrame` to the
-            // field, to help server-side code to determine that the upload happened
-            // through this transport.
-            $("<input type='hidden' value='IFrame' name='X-Requested-With' />")
-                .appendTo(form);
-
-            // Move the file fields into the hidden form, but first remember their
-            // original locations in the document by replacing them with disabled
-            // clones. This should also avoid introducing unwanted changes to the
-            // page layout during submission.
-            fileInputClones = fileInputs.clone()
-                .prop('disabled', true);
-            // Insert a clone for each file input field:
-            fileInputs.after(function (index) {
-                return fileInputClones[index];
-            });
-
-            fileInputs.appendTo(form);
-
+        if (options.async &&
+            (options.type === 'POST' || options.type === 'GET' ||
+            options.type === 'post' || options.type === 'get')
+        ) {
             return {
-
-                // The `send` function is called by jQuery when the request should be
-                // sent.
+                // The `send` function is called by jQuery when the request should be sent.
                 send: function(headers, completeCallback) {
-                    iframe = $("<iframe src='javascript:false;' name='" + name +
-                        "' id='" + name + "' style='display:none'></iframe>");
+                    var iframeName = 'iframe-' + $.now();
+
+                    iframe = $('<iframe src="javascript:false;" name="' + iframeName +
+                        '" id="' + iframeName + '" style="display:none"></iframe>');
+                    form = $('<form style="display:none;" enctype="multipart/form-data"></form>')
+                        .prop('method', options.type)
+                        .prop('action', options.url)
+                        .prop('target', iframe.prop('name'));
 
                     // The first load event gets fired after the iframe has been injected
                     // into the DOM, and is used to prepare the actual submission.
                     iframe.on("load", function() {
+                        var fileInputs = $(options.files).filter('input:file:enabled'),
+                            fileInputClones;
 
                         // The second load event gets fired when the response to the form
-                        // submission is received. The implementation detects whether the
-                        // actual payload is embedded in a `<textarea>` element, and
-                        // prepares the required conversions to be made in that case.
+                        // submission is received.
                         iframe.off("load")
                             .on("load", function() {
                                 var response;
@@ -175,22 +126,61 @@
                                 );
                             });
 
-                        // Now that the load handler has been set up, submit the form.
-                        form[0].submit();
+                        // Add a hidden `X-Requested-With` field with the value `IFrame` to the
+                        // field, to help server-side code to determine that the upload happened
+                        // through this transport.
+                        $("<input type='hidden' value='IFrame' name='X-Requested-With' />")
+                            .appendTo(form);
+
+                        // Move the file fields into the hidden form, but first replace them
+                        // with disabled clones.
+                        fileInputClones = fileInputs.clone()
+                            .prop('disabled', true);
+                        // Insert a clone for each file input field:
+                        fileInputs.after(function (index) {
+                            return fileInputClones[index];
+                        });
+                        fileInputs.appendTo(form);
+
+                        // If there is any additional data specified via the `data` option,
+                        // we add it as hidden fields to the form.
+                        if (typeof(options.data) === "string" && options.data.length > 0) {
+                            $.error("data must not be serialized");
+                        }
+                        $.each(options.data || {}, function(name, value) {
+                            if ($.isPlainObject(value)) {
+                                name = value.name;
+                                value = value.value;
+                            }
+                            $("<input type='hidden' />").attr({name:  name, value: value})
+                                .appendTo(form);
+                        });
+
+                        // Submit the form
+                        form.submit();
+
+                        // Put the file inputs back
+                        if (fileInputClones && fileInputClones.length) {
+                            fileInputClones.replaceWith(function(index) {
+                                return fileInputs.get(index);
+                            });
+                        }
                     });
 
-                    // After everything has been set up correctly, the form and iframe
-                    // get injected into the DOM so that the submission can be
-                    // initiated.
-                    $("body").append(form, iframe);
+                    // Add the form and the iframe to the body to kick off the first
+                    // onload callback
+                    form.append(iframe).appendTo($('body'));
                 },
 
                 // The `abort` function is called by jQuery when the request should be
                 // aborted.
                 abort: function() {
+                    // We set the src in the iframe to abort the iframe's current request
                     if (iframe) {
-                        cleanUp();
+                        iframe.off('load')
+                            .prop('src', 'javascript:false;');
                     }
+                    cleanUp();
                 }
             };
         }
