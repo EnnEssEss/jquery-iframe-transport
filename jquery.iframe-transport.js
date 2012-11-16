@@ -10,16 +10,16 @@
 
 // ## Usage
 
-// To use this plugin, set the dataType to `iframe` in the options of
-// `$.ajax()` call, and specify the file fields to include in the submssion
-// using the `files` option., which can be a selector,
+// To use this plugin, you simply add an `iframe` option with the value `true`
+// to the Ajax settings an `$.ajax()` call, and specify the file fields to
+// include in the submssion using the `files` option, which can be a selector,
 // jQuery object, or a list of DOM elements containing one or more
 // `<input type="file">` elements:
 
 //      $("#myform").submit(function() {
 //          $.ajax(this.action, {
 //              files: $(":file", this),
-//              dataType: 'iframe',
+//              iframe: true,
 //              success: function(data) {
 //                  console.log(data);
 //              });
@@ -37,7 +37,7 @@
 // impossible for the javascript code to determine the HTTP status code of the
 // servers response. Effectively, all of the calls you make will look like they
 // are getting successful responses, and thus invoke the `done()` or
-// `complete()` callbacks. You can only determine communicate problems using
+// `complete()` callbacks. You can only determine communication problems using
 // the content of the response payload. For example, consider using a JSON
 // response such as the following to indicate a problem with an uploaded file:
 
@@ -60,40 +60,45 @@
     // Register a prefilter that checks whether the `iframe` option is set, and
     // switches to the "iframe" data type if it is `true`.
     $.ajaxPrefilter(function(options, origOptions, jqXHR) {
-        if (options.dataType === 'iframe' && options.data) {
+        if (options.iframe) {
+            options.dataType = 'iframe ' + options.dataType;
             options.processData = false;
+            return 'iframe';
         }
     });
 
     // Register a transport for the "iframe" data type. It will only activate
     // when the "files" option has been set to a non-empty list of enabled file
     // inputs.
-    $.ajaxTransport("iframe", function(options, origOptions, jqXHR) {
+    $.ajaxTransport('iframe', function(options, origOptions, jqXHR) {
         var form = null,
             iframe = null,
             name = "iframe-" + $.now(),
-            files = $(options.files).filter(":file:enabled"),
-            markers = null;
+            fileInputs = $(options.files).filter('input:file:enabled'),
+            fileInputClones = null;
 
         // This function gets called after a successful submission or an abortion
         // and should revert all changes made to the page to enable the
         // submission via this transport.
         function cleanUp() {
-                markers.replaceWith(function(idx) {
-                return files.get(idx);
+            fileInputClones.replaceWith(function(index) {
+                return fileInputs.get(index);
             });
-            form.remove();
-            iframe.attr("src", "javascript:false;").remove();
+            if (form) {
+                form.remove();
+            }
+            if (iframe) {
+                // We set the src in the iframe to abort the iframe's current request
+                iframe.off('load')
+                    .prop('src', 'javascript:false;')
+                    .remove();
+            }
         }
 
-        // Remove "iframe" from the data types list so that further processing is
-        // based on the content type returned by the server, without attempting an
-        // (unsupported) conversion from "iframe" to the actual type.
-        options.dataTypes.shift();
-
-        if (files.length) {
-            form = $("<form enctype='multipart/form-data' method='post'></form>").
-                hide().attr({action: options.url, target: name});
+        if (fileInputs.length) {
+            form = $("<form enctype='multipart/form-data' method='post'></form>")
+                .hide()
+                .attr({action: options.url, target: name});
 
             // If there is any additional data specified via the `data` option,
             // we add it as hidden fields to the form. This (currently) requires
@@ -121,10 +126,14 @@
             // original locations in the document by replacing them with disabled
             // clones. This should also avoid introducing unwanted changes to the
             // page layout during submission.
-            markers = files.after(function(idx) {
-                return $(this).clone().prop("disabled", true);
-            }).next();
-            files.appendTo(form);
+            fileInputClones = fileInputs.clone()
+                .prop('disabled', true);
+            // Insert a clone for each file input field:
+            fileInputs.after(function (index) {
+                return fileInputClones[index];
+            });
+
+            fileInputs.appendTo(form);
 
             return {
 
@@ -136,14 +145,14 @@
 
                     // The first load event gets fired after the iframe has been injected
                     // into the DOM, and is used to prepare the actual submission.
-                    iframe.bind("load", function() {
+                    iframe.on("load", function() {
 
                         // The second load event gets fired when the response to the form
                         // submission is received. The implementation detects whether the
                         // actual payload is embedded in a `<textarea>` element, and
                         // prepares the required conversions to be made in that case.
-                        iframe.unbind("load")
-                            .bind("load", function() {
+                        iframe.off("load")
+                            .on("load", function() {
                                 var response;
                                 // Wrap in a try/catch block to catch exceptions thrown
                                 // when trying to access cross-domain iframe contents:
@@ -179,8 +188,7 @@
                 // The `abort` function is called by jQuery when the request should be
                 // aborted.
                 abort: function() {
-                    if (iframe !== null) {
-                        iframe.unbind("load").attr("src", "javascript:false;");
+                    if (iframe) {
                         cleanUp();
                     }
                 }
