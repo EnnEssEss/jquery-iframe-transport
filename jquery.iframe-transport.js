@@ -57,7 +57,6 @@
     $.ajaxPrefilter(function(options, origOptions, jqXHR) {
         if (options.iframe) {
             options.dataType = 'iframe ' + options.dataType;
-            options.processData = false;
             return 'iframe';
         }
     });
@@ -85,7 +84,8 @@
             return {
                 // The `send` function is called by jQuery when the request should be sent.
                 send: function(headers, completeCallback) {
-                    var iframeName = 'iframe-' + $.now();
+                    var iframeName = 'iframe-' + $.now(),
+                        postParams;
 
                     iframe = $('<iframe src="javascript:false;" name="' + iframeName +
                         '" id="' + iframeName + '" style="display:none"></iframe>');
@@ -145,9 +145,18 @@
                         // If there is any additional data specified via the `data` option,
                         // we add it as hidden fields to the form.
                         if (typeof(options.data) === "string" && options.data.length > 0) {
-                            $.error("data must not be serialized");
+                            postParams = $.map(options.data.split('&'), function (element) {
+                                var pair = element.split('=');
+                                return {
+                                    name: decodeURIComponent(pair[0]),
+                                    value: decodeURIComponent(pair[1])
+                                };
+                            });
+                        } else {
+                            postParams = options.data;
                         }
-                        $.each(options.data || {}, function(name, value) {
+
+                        $.each(postParams || {}, function(name, value) {
                             if ($.isPlainObject(value)) {
                                 name = value.name;
                                 value = value.value;
